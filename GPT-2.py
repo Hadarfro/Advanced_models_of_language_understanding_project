@@ -8,6 +8,7 @@ from transformers import AutoModelForSequenceClassification
 from datasets import Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import precision_recall_fscore_support
 import pandas as pd
 import torch
 import numpy as np
@@ -48,42 +49,51 @@ def compute_metrics(eval_pred):
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
     acc = accuracy_score(labels, predictions)
-    return {"accuracy": acc}
+    precision, recall, f1, _ = precision_recall_fscore_support(labels, predictions, average="weighted")
+    return {
+        "accuracy": acc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1
+    }
 
 # === GPT-2 Setup ===
 
-# הגדר את קונפיגורציית LoRA
 lora_config = LoraConfig(
-    r=8,
-    lora_alpha=32,
-    target_modules=["c_attn", "c_proj"],  # מודולים מתאימים ל-GPT-2
+    r=16,
+    lora_alpha=64,
+    target_modules=["c_attn", "c_proj"],
     lora_dropout=0.1,
     bias="none",
     task_type=TaskType.SEQ_CLS
 )
 
-gpt2_base = GPT2ForSequenceClassification.from_pretrained("gpt2", num_labels=len(label2id))
-gpt2_base.config.pad_token_id = gpt2_base.config.eos_token_id
-gpt2_base.config.label2id = label2id
-gpt2_base.config.id2label = id2label
-
-# Apply LoRA
-gpt2_model = get_peft_model(gpt2_base, lora_config)
-gpt2_model.print_trainable_parameters()
-
-gpt2_tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+gpt2_tokenizer = GPT2Tokenizer.from_pretrained("lvwerra/gpt2-imdb")
 gpt2_tokenizer.pad_token = gpt2_tokenizer.eos_token
+
+gpt2_model = GPT2ForSequenceClassification.from_pretrained("lvwerra/gpt2-imdb", num_labels=len(label2id))
+gpt2_model.config.pad_token_id = gpt2_model.config.eos_token_id
+gpt2_model.config.label2id = label2id
+gpt2_model.config.id2label = id2label
 
 gpt2_train = train_dataset.map(lambda x: tokenize_data(x, gpt2_tokenizer), batched=True)
 gpt2_test = test_dataset.map(lambda x: tokenize_data(x, gpt2_tokenizer), batched=True)
 
 gpt2_args = TrainingArguments(
     output_dir="./gpt2_results",
-    per_device_train_batch_size=4,
-    per_device_eval_batch_size=4,
-    num_train_epochs=5,
-    logging_dir="./logs/gpt2"
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    num_train_epochs=10,
+    learning_rate=2e-5,
+    weight_decay=0.01,
+    warmup_steps=100,
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    logging_dir="./logs/gpt2",
+    load_best_model_at_end=True,
+    metric_for_best_model="accuracy",
 )
+
 
 gpt2_trainer = Trainer(
     model=gpt2_model,
@@ -111,11 +121,19 @@ bert_test = test_dataset.map(lambda x: tokenize_data(x, bert_tokenizer), batched
 
 bert_args = TrainingArguments(
     output_dir="./bert_results",
-    per_device_train_batch_size=4,
-    per_device_eval_batch_size=4,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
     num_train_epochs=5,
-    logging_dir="./logs/bert"
+    learning_rate=2e-5,
+    weight_decay=0.01,
+    warmup_steps=100,
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    logging_dir="./logs/bert",
+    load_best_model_at_end=True,
+    metric_for_best_model="accuracy",
 )
+
 
 bert_trainer = Trainer(
     model=bert_model,
