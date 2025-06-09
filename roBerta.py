@@ -17,7 +17,7 @@ import numpy as np
 df = pd.read_csv("Combined Data.csv")
 
 # Balance the dataset
-sample_size = 1000
+sample_size = 500
 balanced_subset = (
     df.groupby("status", group_keys=False)
     .apply(lambda x: x.sample(n=min(sample_size, len(x)), random_state=42), include_groups=True)
@@ -57,101 +57,6 @@ def compute_metrics(eval_pred):
         "f1": f1
     }
 
-# === GPT-2 Setup ===
-
-lora_config = LoraConfig(
-    r=16,
-    lora_alpha=64,
-    target_modules=["c_attn", "c_proj"],
-    lora_dropout=0.1,
-    bias="none",
-    task_type=TaskType.SEQ_CLS
-)
-
-gpt2_tokenizer = GPT2Tokenizer.from_pretrained("lvwerra/gpt2-imdb")
-gpt2_tokenizer.pad_token = gpt2_tokenizer.eos_token
-
-gpt2_model = GPT2ForSequenceClassification.from_pretrained("lvwerra/gpt2-imdb", num_labels=len(label2id))
-gpt2_model.config.pad_token_id = gpt2_model.config.eos_token_id
-gpt2_model.config.label2id = label2id
-gpt2_model.config.id2label = id2label
-
-gpt2_train = train_dataset.map(lambda x: tokenize_data(x, gpt2_tokenizer), batched=True)
-gpt2_test = test_dataset.map(lambda x: tokenize_data(x, gpt2_tokenizer), batched=True)
-
-gpt2_args = TrainingArguments(
-    output_dir="./gpt2_results",
-    per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
-    num_train_epochs=10,
-    learning_rate=2e-5,
-    weight_decay=0.01,
-    warmup_steps=100,
-    evaluation_strategy="epoch",
-    save_strategy="epoch",
-    logging_dir="./logs/gpt2",
-    load_best_model_at_end=True,
-    metric_for_best_model="accuracy",
-)
-
-
-gpt2_trainer = Trainer(
-    model=gpt2_model,
-    args=gpt2_args,
-    train_dataset=gpt2_train,
-    eval_dataset=gpt2_test,
-    compute_metrics=compute_metrics,
-)
-
-print("🚀 Training GPT-2...")
-gpt2_trainer.train()
-gpt2_results = gpt2_trainer.predict(gpt2_test)
-print("\n📊 GPT-2 Test Metrics:", gpt2_results.metrics)
-gpt2_y_pred = np.argmax(gpt2_results.predictions, axis=1)
-gpt2_y_true = gpt2_results.label_ids
-
-# === BERT Setup ===
-bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-bert_model = BertForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=len(label2id))
-bert_model.config.label2id = label2id
-bert_model.config.id2label = id2label
-
-bert_train = train_dataset.map(lambda x: tokenize_data(x, bert_tokenizer), batched=True)
-bert_test = test_dataset.map(lambda x: tokenize_data(x, bert_tokenizer), batched=True)
-
-bert_args = TrainingArguments(
-    output_dir="./bert_results",
-    per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
-    num_train_epochs=10,
-    learning_rate=2e-5,
-    weight_decay=0.01,
-    warmup_steps=100,
-    evaluation_strategy="epoch",
-    save_strategy="epoch",
-    logging_dir="./logs/bert",
-    load_best_model_at_end=True,
-    metric_for_best_model="accuracy",
-)
-
-
-bert_trainer = Trainer(
-    model=bert_model,
-    args=bert_args,
-    train_dataset=bert_train,
-    eval_dataset=bert_test,
-    compute_metrics=compute_metrics,
-)
-
-print("\n🚀 Training BERT...")
-bert_trainer.train()
-bert_results = bert_trainer.predict(bert_test)
-print("\n📊 BERT Test Metrics:", bert_results.metrics)
-bert_y_pred = np.argmax(bert_results.predictions, axis=1)
-bert_y_true = bert_results.label_ids
-
-# === RoBERTa setup ===
-
 # Load tokenizer and model
 roberta_tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
 roberta_model = RobertaForSequenceClassification.from_pretrained("roberta-base", num_labels=len(label2id))
@@ -169,7 +74,7 @@ roberta_args = TrainingArguments(
     output_dir="./roberta_results",
     per_device_train_batch_size=4,
     per_device_eval_batch_size=4,
-    num_train_epochs=10,
+    num_train_epochs=5,
     logging_dir="./logs/roberta",
     evaluation_strategy="epoch"
 )
@@ -193,13 +98,5 @@ roberta_y_pred = np.argmax(roberta_results.predictions, axis=1)
 roberta_y_true = roberta_results.label_ids
 
 print("\n📊 RoBERTa Test Metrics:", roberta_results.metrics)
-
-# === Compare Reports ===
-print("\n📋 GPT-2 Classification Report:")
-print(classification_report(gpt2_y_true, gpt2_y_pred, target_names=[id2label[i] for i in sorted(id2label.keys())]))
-
-print("\n📋 BERT Classification Report:")
-print(classification_report(bert_y_true, bert_y_pred, target_names=[id2label[i] for i in sorted(id2label.keys())]))
-
 print("\n📋 RoBERTa Classification Report:")
 print(classification_report(roberta_y_true, roberta_y_pred, target_names=[id2label[i] for i in sorted(id2label.keys())]))
